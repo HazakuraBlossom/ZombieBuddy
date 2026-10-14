@@ -276,3 +276,52 @@ func lineRange(start int, count int) string {
 	}
 	return fmt.Sprintf("%d,%d", start, count)
 }
+
+func TestAddZombieBuddyLaunchOptions(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", "-agentlib:zbNative --"},
+		{"blank", "   ", "-agentlib:zbNative --"},
+		{"preserves existing options", "-cachedir=G:\\Cache", "-agentlib:zbNative -- -cachedir=G:\\Cache"},
+		{"preserves multiple options", "-nosteam -debug", "-agentlib:zbNative -- -nosteam -debug"},
+		{"after %command%", "ENV=1 %command% -debug", "ENV=1 %command% -agentlib:zbNative -- -debug"},
+		{"bare %command%", "%command%", "%command% -agentlib:zbNative --"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := addZombieBuddyLaunchOptions(tt.input)
+			if got != tt.want {
+				t.Fatalf("addZombieBuddyLaunchOptions(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+			stripped, changed := stripZombieBuddyLaunchOptions(got)
+			if !changed || stripped != strings.Join(strings.Fields(tt.input), " ") {
+				t.Fatalf("strip(%q) = %q, %v; want %q", got, stripped, changed, strings.Join(strings.Fields(tt.input), " "))
+			}
+		})
+	}
+}
+
+func TestPatchVDFPreservesLaunchOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "localconfig.vdf")
+	vdfText := "\"UserLocalConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\t\t\t\t\"Apps\"\n\t\t\t\t{\n" +
+		"\t\t\t\t\t\"" + PZ_APP_ID + "\"\n\t\t\t\t\t{\n" +
+		"\t\t\t\t\t\t\"LaunchOptions\"\t\t\"-cachedir=\\\"G:\\\\Some Dir\\\" -debug\"\n" +
+		"\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n"
+	if err := os.WriteFile(path, []byte(vdfText), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := manualPatchVDF(path, "", addZombieBuddyLaunchOptions(`-cachedir="G:\Some Dir" -debug`)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readPZLaunchOptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `-agentlib:zbNative -- -cachedir="G:\Some Dir" -debug`
+	if got != want {
+		t.Fatalf("launch options = %q, want %q", got, want)
+	}
+}
