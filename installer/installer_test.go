@@ -36,8 +36,8 @@ func TestFindAppInLibraries(t *testing.T) {
 			}
 
 			vdfContent := "\"libraryfolders\"\n{\n" +
-				"\t\"0\"\n\t{\n\t\t\"path\"\t\t\"" + libs[0] + "\"\n\t}\n" +
-				"\t\"1\"\n\t{\n\t\t\"path\"\t\t\"" + libs[1] + "\"\n\t}\n" +
+				"\t\"0\"\n\t{\n\t\t\"path\"\t\t\"" + strings.ReplaceAll(libs[0], "\\", "\\\\") + "\"\n\t}\n" +
+				"\t\"1\"\n\t{\n\t\t\"path\"\t\t\"" + strings.ReplaceAll(libs[1], "\\", "\\\\") + "\"\n\t}\n" +
 				"}\n"
 			vdfPath := filepath.Join(tmpDir, "libraryfolders.vdf")
 			if err := os.WriteFile(vdfPath, []byte(vdfContent), 0644); err != nil {
@@ -275,4 +275,76 @@ func lineRange(start int, count int) string {
 		return fmt.Sprintf("%d", start)
 	}
 	return fmt.Sprintf("%d,%d", start, count)
+}
+
+func TestDetectZBPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		copies   []int
+		wantLib  int
+		noPZPath bool
+		noVDF    bool
+	}{
+		{name: "game library wins over default and other copies", copies: []int{0, 1, 2}, wantLib: 1},
+		{name: "game library works without libraryfolders", copies: []int{1}, wantLib: 1, noVDF: true},
+		{name: "missing game copy falls back to default", copies: []int{0, 2}, wantLib: 0},
+		{name: "missing game and default copies falls back to other library", copies: []int{2}, wantLib: 2},
+		{name: "empty game path falls back to default", copies: []int{0, 1}, wantLib: 0, noPZPath: true},
+		{name: "empty game path falls back to other library", copies: []int{2}, wantLib: 2, noPZPath: true},
+		{name: "no subscribed copy", wantLib: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			libs := []string{
+				filepath.Join(tmpDir, "Steam"),
+				filepath.Join(tmpDir, "Game Library"),
+				filepath.Join(tmpDir, "Other Library"),
+			}
+			for _, lib := range libs {
+				if err := os.MkdirAll(filepath.Join(lib, "steamapps"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// A custom game folder still has steamapps/common as its parents.
+			pzPath := filepath.Join(libs[1], "steamapps", "common", "ProjectZomboid Custom")
+			if err := os.MkdirAll(pzPath, 0755); err != nil {
+				t.Fatal(err)
+			}
+			workshopPath := func(lib int) string {
+				return filepath.Join(libs[lib], "steamapps", "workshop", "content", PZ_APP_ID, ZB_MOD_ID)
+			}
+			for _, lib := range tt.copies {
+				if err := os.MkdirAll(workshopPath(lib), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !tt.noVDF {
+				vdfContent := "\"libraryfolders\"\n{\n"
+				for i, lib := range libs {
+					vdfContent += fmt.Sprintf("\"%d\" { \"path\" \"%s\" }\n", i, filepath.ToSlash(lib))
+				}
+				vdfContent += "}\n"
+				if err := os.WriteFile(filepath.Join(libs[0], "steamapps", "libraryfolders.vdf"), []byte(vdfContent), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.noPZPath {
+				pzPath = ""
+			}
+			got, err := detectZBPath(libs[0], pzPath)
+			if tt.wantLib < 0 {
+				if err == nil {
+					t.Fatalf("expected an error, got path %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := workshopPath(tt.wantLib); got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		})
+	}
 }
