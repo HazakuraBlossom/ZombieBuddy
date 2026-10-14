@@ -528,26 +528,22 @@ func waitForSteamToClose(operation string) {
 }
 
 func detectPZPath(steamPath string) (string, error) {
-	// First check the default path
+	// Check every Steam library's app manifest before any legacy directory.
+	// Steam's manifest is authoritative even when an old default directory
+	// remains after moving the game to another drive or a custom folder.
+	libraryVDF := filepath.Join(steamPath, "steamapps", "libraryfolders.vdf")
+	if path, err := findSteamAppInstallDirInLibraries(libraryVDF, PZ_APP_ID); err == nil {
+		return path, nil
+	}
+
+	// Older or unusual Steam installs may be missing the manifest, so keep
+	// the previous default path and directory scan as fallbacks.
 	defaultPath := filepath.Join(steamPath, "steamapps", "common", "ProjectZomboid")
 	if _, err := os.Stat(defaultPath); err == nil {
 		return defaultPath, nil
 	}
-
-	// Then check every Steam library. Prefer the app manifest because it is
-	// Steam's authoritative source for the install directory and works even
-	// when the game lives on another drive or uses a non-default folder name.
-	libraryVDF := filepath.Join(steamPath, "steamapps", "libraryfolders.vdf")
-	if _, err := os.Stat(libraryVDF); err == nil {
-		if path, err := findSteamAppInstallDirInLibraries(libraryVDF, PZ_APP_ID); err == nil {
-			return path, nil
-		}
-
-		// Older or unusual Steam installs may be missing the manifest, so keep
-		// the previous directory scan as a fallback.
-		if path, err := findAppInLibraries(libraryVDF, "common", "ProjectZomboid"); err == nil {
-			return path, nil
-		}
+	if path, err := findAppInLibraries(libraryVDF, "common", "ProjectZomboid"); err == nil {
+		return path, nil
 	}
 
 	// Last-resort Windows fallback: Steam registers installed games with an
