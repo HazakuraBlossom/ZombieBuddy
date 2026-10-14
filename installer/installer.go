@@ -20,6 +20,7 @@ import (
 const (
 	PZ_APP_ID         = "108600"
 	ZB_MOD_ID         = "3619862853"
+	ZB_BETA_MOD_ID    = "3812624292"
 	INSTALLER_VERSION = "4.3"
 	ZB_LAUNCH_ARG     = "-agentlib:zbNative"
 	ZB_LAUNCH_OPTIONS = ZB_LAUNCH_ARG + " --"
@@ -400,12 +401,19 @@ func detectInstallPaths(includeZB bool) (installPaths, error) {
 
 	paths := installPaths{steam: steamPath, pz: pzPath}
 	if includeZB {
-		zbPath, err := detectZBPath(steamPath, pzPath)
-		if err != nil {
-			return installPaths{}, fmt.Errorf("Error detecting ZombieBuddy mod: %v", err)
+		copies := detectZBCopies(steamPath, pzPath)
+		if len(copies) == 0 {
+			return installPaths{}, fmt.Errorf("Error detecting ZombieBuddy mod: %v", errZBNotSubscribed())
 		}
-		fmt.Printf("[.] %-*s is at %s\n", maxLen, "ZB", zbPath)
-		paths.zb = zbPath
+		chosen := copies[0]
+		if len(copies) > 1 {
+			chosen, err = promptZBCopy(bufio.NewReader(os.Stdin), copies)
+			if err != nil {
+				return installPaths{}, fmt.Errorf("Error selecting ZombieBuddy version: %v", err)
+			}
+		}
+		fmt.Printf("[.] %-*s is at %s (%s)\n", maxLen, "ZB", chosen.path, chosen.channel)
+		paths.zb = chosen.path
 	}
 	return paths, nil
 }
@@ -543,18 +551,83 @@ func detectPZPath(steamPath string) (string, error) {
 	return "", fmt.Errorf("could not find Project Zomboid installation")
 }
 
+// zbCopy is one subscribed ZombieBuddy Workshop item found on disk.
+type zbCopy struct {
+	channel string // "stable" or "beta"
+	path    string
+}
+
+var zbChannels = []struct{ name, id string }{
+	{"stable", ZB_MOD_ID},
+	{"beta", ZB_BETA_MOD_ID},
+}
+
+// detectZBCopies returns every subscribed ZombieBuddy Workshop item found, stable first.
+func detectZBCopies(steamPath string, pzPath string) []zbCopy {
+	var copies []zbCopy
+	for _, ch := range zbChannels {
+		if path, err := findZBPath(steamPath, pzPath, ch.id); err == nil {
+			copies = append(copies, zbCopy{channel: ch.name, path: path})
+		}
+	}
+	return copies
+}
+
+// detectZBPath returns the preferred copy (stable if subscribed, otherwise beta).
 func detectZBPath(steamPath string, pzPath string) (string, error) {
+	copies := detectZBCopies(steamPath, pzPath)
+	if len(copies) == 0 {
+		return "", errZBNotSubscribed()
+	}
+	return copies[0].path, nil
+}
+
+func errZBNotSubscribed() error {
+	return fmt.Errorf("Make sure you've subscribed to https://steamcommunity.com/sharedfiles/filedetails/?id=%s (or the beta: ?id=%s)", ZB_MOD_ID, ZB_BETA_MOD_ID)
+}
+
+func promptZBCopy(reader *bufio.Reader, copies []zbCopy) (zbCopy, error) {
+	lines := make([]string, len(copies))
+	options := make([]promptOption, len(copies))
+	nums := make([]string, len(copies))
+	for i, c := range copies {
+		n := fmt.Sprint(i + 1)
+		nums[i] = n
+		lines[i] = fmt.Sprintf("  %s) %s (%s)", n, c.channel, c.path)
+		options[i] = promptOption{value: c.channel, keys: []string{n, c.channel, c.channel[:1]}}
+	}
+	choices := strings.Join(nums[:len(nums)-1], ", ") + " or " + nums[len(nums)-1]
+	value, err := promptChoice(reader, promptChoiceConfig{
+		title:   "Both stable and beta ZombieBuddy are subscribed. Which one should be installed?",
+		lines:   lines,
+		prompt:  "Choose " + choices + ": ",
+		eofErr:  "no ZombieBuddy version selected",
+		invalid: "Please choose " + choices + ".",
+		options: options,
+	})
+	if err != nil {
+		return zbCopy{}, err
+	}
+	for _, c := range copies {
+		if c.channel == value {
+			return c, nil
+		}
+	}
+	return zbCopy{}, fmt.Errorf("unknown ZombieBuddy version %q", value)
+}
+
+func findZBPath(steamPath string, pzPath string, modID string) (string, error) {
 	// Prefer Workshop content installed in the same Steam library as the game.
 	if pzPath != "" {
 		steamappsPath := filepath.Dir(filepath.Dir(pzPath))
-		gameLibraryPath := filepath.Join(steamappsPath, "workshop", "content", PZ_APP_ID, ZB_MOD_ID)
+		gameLibraryPath := filepath.Join(steamappsPath, "workshop", "content", PZ_APP_ID, modID)
 		if _, err := os.Stat(gameLibraryPath); err == nil {
 			return gameLibraryPath, nil
 		}
 	}
 
 	// First check the default path
-	defaultPath := filepath.Join(steamPath, "steamapps", "workshop", "content", PZ_APP_ID, ZB_MOD_ID)
+	defaultPath := filepath.Join(steamPath, "steamapps", "workshop", "content", PZ_APP_ID, modID)
 	if _, err := os.Stat(defaultPath); err == nil {
 		return defaultPath, nil
 	}
@@ -562,10 +635,10 @@ func detectZBPath(steamPath string, pzPath string) (string, error) {
 	// Then check libraryfolders.vdf
 	libraryVDF := filepath.Join(steamPath, "steamapps", "libraryfolders.vdf")
 	if _, err := os.Stat(libraryVDF); err == nil {
-		return findAppInLibraries(libraryVDF, "workshop", "content", PZ_APP_ID, ZB_MOD_ID)
+		return findAppInLibraries(libraryVDF, "workshop", "content", PZ_APP_ID, modID)
 	}
 
-	return "", fmt.Errorf("Make sure you've subscribed to https://steamcommunity.com/sharedfiles/filedetails/?id=3619862853")
+	return "", errZBNotSubscribed()
 }
 
 func findAppInLibraries(libraryVDFPath string, subPath ...string) (string, error) {

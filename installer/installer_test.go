@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -395,5 +396,65 @@ func TestPatchVDFPreservesLaunchOptions(t *testing.T) {
 	want := `-agentlib:zbNative -- -cachedir="G:\Some Dir" -debug`
 	if got != want {
 		t.Fatalf("launch options = %q, want %q", got, want)
+	}
+}
+
+func TestDetectZBPathBeta(t *testing.T) {
+	tmpDir := t.TempDir()
+	steam := filepath.Join(tmpDir, "Steam")
+	pzPath := filepath.Join(steam, "steamapps", "common", "ProjectZomboid")
+	if err := os.MkdirAll(pzPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	workshop := func(id string) string {
+		return filepath.Join(steam, "steamapps", "workshop", "content", PZ_APP_ID, id)
+	}
+
+	if _, err := detectZBPath(steam, pzPath); err == nil {
+		t.Fatal("expected an error with no subscribed copy")
+	}
+
+	if err := os.MkdirAll(workshop(ZB_BETA_MOD_ID), 0755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := detectZBPath(steam, pzPath)
+	if err != nil || got != workshop(ZB_BETA_MOD_ID) {
+		t.Fatalf("beta only: got %q, %v; want %q", got, err, workshop(ZB_BETA_MOD_ID))
+	}
+
+	if err := os.MkdirAll(workshop(ZB_MOD_ID), 0755); err != nil {
+		t.Fatal(err)
+	}
+	got, err = detectZBPath(steam, pzPath)
+	if err != nil || got != workshop(ZB_MOD_ID) {
+		t.Fatalf("both: got %q, %v; want stable %q", got, err, workshop(ZB_MOD_ID))
+	}
+}
+
+func TestDetectZBCopiesAndPrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	steam := filepath.Join(tmpDir, "Steam")
+	pzPath := filepath.Join(steam, "steamapps", "common", "ProjectZomboid")
+	if err := os.MkdirAll(pzPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{ZB_MOD_ID, ZB_BETA_MOD_ID} {
+		if err := os.MkdirAll(filepath.Join(steam, "steamapps", "workshop", "content", PZ_APP_ID, id), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copies := detectZBCopies(steam, pzPath)
+	if len(copies) != 2 || copies[0].channel != "stable" || copies[1].channel != "beta" {
+		t.Fatalf("copies = %+v, want stable then beta", copies)
+	}
+
+	for input, want := range map[string]string{"1\n": "stable", "2\n": "beta", "beta\n": "beta", "S\n": "stable", "x\n2\n": "beta"} {
+		got, err := promptZBCopy(bufio.NewReader(strings.NewReader(input)), copies)
+		if err != nil || got.channel != want {
+			t.Fatalf("input %q: got %+v, %v; want %s", input, got, err, want)
+		}
+	}
+	if _, err := promptZBCopy(bufio.NewReader(strings.NewReader("")), copies); err == nil {
+		t.Fatal("expected an error on EOF")
 	}
 }
