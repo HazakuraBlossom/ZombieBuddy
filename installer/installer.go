@@ -20,7 +20,7 @@ import (
 const (
 	PZ_APP_ID         = "108600"
 	ZB_MOD_ID         = "3619862853"
-	INSTALLER_VERSION = "4.2"
+	INSTALLER_VERSION = "4.3"
 	ZB_LAUNCH_ARG     = "-agentlib:zbNative"
 	ZB_LAUNCH_OPTIONS = ZB_LAUNCH_ARG + " --"
 )
@@ -1003,7 +1003,7 @@ func patchVDF(path string) (bool, error) {
 
 	currentOptions := launchOptionsFromConfig(pz)
 
-	newOptions := ZB_LAUNCH_OPTIONS
+	newOptions := addZombieBuddyLaunchOptions(currentOptions)
 	if hasZombieBuddyLaunchOptions(currentOptions) {
 		fmt.Println("[-] Launch options already contain ZombieBuddy agent.")
 		return false, nil
@@ -1097,6 +1097,29 @@ func formatMapKeys(m map[string]interface{}) string {
 	return strings.Join(keys, ", ")
 }
 
+// addZombieBuddyLaunchOptions prepends the ZombieBuddy agent to existing Steam launch options, preserving them.
+// With a "%command%" wrapper form the agent goes right after it, because only what follows %command% is passed to the game.
+func addZombieBuddyLaunchOptions(options string) string {
+	options = strings.TrimSpace(options)
+	if options == "" {
+		return ZB_LAUNCH_OPTIONS
+	}
+	if i := strings.Index(options, "%command%"); i >= 0 {
+		i += len("%command%")
+		out := options[:i] + " " + ZB_LAUNCH_OPTIONS
+		if rest := strings.TrimSpace(options[i:]); rest != "" {
+			out += " " + rest
+		}
+		return out
+	}
+	return ZB_LAUNCH_OPTIONS + " " + options
+}
+
+// escapeVDFString escapes a value for writing between double quotes in a VDF file; the parser unescapes \\ and \" on read.
+func escapeVDFString(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
+}
+
 func hasZombieBuddyLaunchOptions(options string) bool {
 	_, changed := stripZombieBuddyLaunchOptions(options)
 	return changed
@@ -1144,6 +1167,7 @@ func navigateMap(m map[string]interface{}, path ...string) (map[string]interface
 }
 
 func manualPatchVDF(path, oldOpts, newOpts string) error {
+	newOpts = escapeVDFString(newOpts)
 	input, err := os.ReadFile(path)
 	if err != nil {
 		return err
