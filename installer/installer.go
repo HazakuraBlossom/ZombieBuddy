@@ -593,7 +593,8 @@ func findAppInLibraries(libraryVDFPath string, subPath ...string) (string, error
 func findSteamAppInstallDirInLibraries(libraryVDFPath string, appID string) (string, error) {
 	libraryPaths, err := steamLibraryPaths(libraryVDFPath)
 	if err != nil {
-		return "", err
+		// The client library is known even when its library index is unavailable.
+		libraryPaths = []string{filepath.Dir(filepath.Dir(libraryVDFPath))}
 	}
 
 	for _, libraryPath := range libraryPaths {
