@@ -21,7 +21,7 @@ const (
 	PZ_APP_ID         = "108600"
 	ZB_MOD_ID         = "3619862853"
 	ZB_BETA_MOD_ID    = "3812624292"
-	INSTALLER_VERSION = "4.3"
+	INSTALLER_VERSION = "4.4"
 	ZB_LAUNCH_ARG     = "-agentlib:zbNative"
 	ZB_LAUNCH_OPTIONS = ZB_LAUNCH_ARG + " --"
 )
